@@ -1,0 +1,53 @@
+name: Run Changed SQL Files
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-changed-sql:
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # HEAD~1 비교 가능하도록
+
+      # 2. SqlServer 모듈 설치
+      - name: Install SqlServer module
+        shell: pwsh
+        run: |
+          Install-Module -Name SqlServer -Force -Scope CurrentUser -AllowClobber
+
+      # 3. 변경된 SQL 파일 찾기
+      - name: Get changed SQL files
+        id: changed-sql
+        shell: pwsh
+        run: |
+          $changed = git diff --name-only HEAD~1 HEAD -- "*.sql"
+          if ($changed) {
+            $changed -join "`n" | Out-File changed_sql_files.txt
+          }
+
+      # 4. 변경된 SQL 실행
+      - name: Run changed SQL files with Invoke-Sqlcmd
+        if: success()
+        shell: pwsh
+        run: |
+          Import-Module SqlServer
+          if (Test-Path "changed_sql_files.txt") {
+            $files = Get-Content changed_sql_files.txt
+            foreach ($file in $files) {
+              Invoke-Sqlcmd `
+                -ServerInstance "${{ secrets.SQL_SERVER }}" `
+                -Database "${{ secrets.SQL_DB }}" `
+                -Username "${{ secrets.SQL_USER }}" `
+                -Password "${{ secrets.SQL_PASSWORD }}" `
+                -Encrypt Optional `
+                -TrustServerCertificate `
+                -InputFile $file
+            }
+          }
